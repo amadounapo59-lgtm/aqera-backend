@@ -1,0 +1,471 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// =========================
+// Enums
+// =========================
+
+enum GiftCardPurchaseStatus {
+  ACTIVE
+  USED
+  CANCELED
+  REFUNDED
+}
+
+enum BrandApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AgencyApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Badge visible côté user (les XP/streak restent internes)
+enum UserBadge {
+  STARTER
+  REGULAR
+  ELITE
+}
+
+// =========================
+// Core models
+// =========================
+
+model User {
+  id           Int     @id @default(autoincrement())
+  email        String  @unique
+  name         String
+  passwordHash String?
+  role         String  @default("USER") // USER | CREATOR | BRAND | AGENCY | ADMIN
+
+  // Temp password flow (Brand users)
+  mustChangePassword    Boolean   @default(false)
+  tempPasswordIssuedAt  DateTime?
+  tempPasswordExpiresAt DateTime?
+
+  // Wallet split (Aqera ne crée pas d'argent)
+  // - pendingCents: gagné mais verrouillé (en attente de validation)
+  // - availableCents: utilisable (uniquement en cartes cadeaux)
+  pendingCents   Int @default(0)
+  availableCents Int @default(0)
+
+  // Backward compatibility (mobile/web utilisent encore balanceCents)
+  balanceCents Int @default(0)
+
+  // Badge & daily cap
+  badgeLevel   UserBadge @default(STARTER)
+  dailyCapCents Int      @default(1000) // 10$ au départ
+
+  // Internals (non affichés à l'utilisateur)
+  xp           Int      @default(0)
+  streakDays   Int      @default(0)
+  lastEarnedAt DateTime?
+  // ✅ Useful for "engaged users" counters (web dashboard)
+  lastActiveAt DateTime?
+
+  brandId Int?
+  brand   Brand? @relation(fields: [brandId], references: [id])
+
+  // Agency account (optional)
+  agencyId Int?
+  agency   Agency? @relation(fields: [agencyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Legacy
+  missionCompletions MissionCompletion[]
+
+  // New flow
+  missionAttempts    MissionAttempt[]
+  reviewedAttempts   MissionAttempt[]    @relation("ReviewedAttempts")
+  walletTransactions WalletTransaction[]
+
+  // Gift card purchases
+  giftCardPurchases GiftCardPurchase[] @relation("UserGiftCardPurchases")
+  usedPurchases     GiftCardPurchase[] @relation("BrandUserUsedPurchases")
+
+  // Brand applications reviewed by admin
+  reviewedBrandApplications BrandApplication[] @relation("ReviewedBrandApplications")
+
+  // Agency applications reviewed by admin
+  reviewedAgencyApplications AgencyApplication[] @relation("ReviewedAgencyApplications")
+
+  // Daily earnings (for caps + streak)
+  dailyEarnings UserDailyEarning[]
+}
+
+// -------------------------
+// Agencies (manage multiple brands)
+// -------------------------
+model Agency {
+  id        Int    @id @default(autoincrement())
+  name      String @unique
+  slug      String @unique
+  email     String @unique
+  phone     String?
+  website   String?
+  instagram String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  subscriptionStatus   String? // TRIALING | ACTIVE | PAST_DUE | CANCELED
+  trialEndsAt          DateTime?
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  plan                 String? // FREE | STARTER | PRO | ELITE
+
+  // Users belonging to the agency
+  users User[]
+
+  // Brands managed by the agency (many-to-many)
+  brands AgencyBrand[]
+
+  // Applications that led to this agency
+  applications AgencyApplication[]
+}
+
+model AgencyBrand {
+  id       Int    @id @default(autoincrement())
+  agencyId Int
+  brandId  Int
+
+  role     String? // OWNER | MANAGER | ANALYST (optional)
+  createdAt DateTime @default(now())
+
+  agency Agency @relation(fields: [agencyId], references: [id])
+  brand  Brand  @relation(fields: [brandId], references: [id])
+
+  @@unique([agencyId, brandId], name: "uniq_agency_brand")
+  @@index([agencyId])
+  @@index([brandId])
+}
+
+model Brand {
+  id          Int     @id @default(autoincrement())
+  name        String  @unique
+  slug        String  @unique
+  description String?
+  logoUrl     String?
+  website     String?
+  coverUrl    String?
+
+  subscriptionStatus   String? // TRIALING | ACTIVE | PAST_DUE | CANCELED
+  trialEndsAt          DateTime?
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  plan                 String? // FREE | STARTER | PRO | ELITE
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  missions Mission[]
+  users    User[]
+
+  // Application that led to this brand
+  applications BrandApplication[]
+
+  // Brand budget locked in AQERA pool
+  budget BrandBudget?
+
+  // Agencies managing this brand
+  agencies AgencyBrand[]
+}
+
+// -------------------------
+// AQERA central pool
+// -------------------------
+// Singleton row (id=1) that represents total locked value.
+model CentralPool {
+  id Int @id @default(1)
+
+  // Total deposited by brands into AQERA
+  totalDepositedCents Int @default(0)
+
+  // Liability to users (pending + available)
+  reservedLiabilityCents Int @default(0)
+
+  // Total consumed into issued gift cards
+  totalSpentCents Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model BrandBudget {
+  id      Int @id @default(autoincrement())
+  brandId Int @unique
+  brand   Brand @relation(fields: [brandId], references: [id])
+
+  // Money deposited by brand
+  totalDepositedCents Int @default(0)
+
+  // Reserved for pending missions (Pocket B)
+  reservedForMissionsCents Int @default(0)
+
+  // Spent on APPROVED marketing missions (Pocket D)
+  spentCents Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([brandId])
+}
+
+model UserDailyEarning {
+  id Int @id @default(autoincrement())
+  userId Int
+  user User @relation(fields: [userId], references: [id])
+
+  // YYYY-MM-DD (local logic handled in service)
+  dateKey String
+  earnedCents Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, dateKey], name: "uniq_user_day")
+  @@index([dateKey])
+}
+
+// =========================
+// Brand applications
+// =========================
+
+model BrandApplication {
+  id Int @id @default(autoincrement())
+
+  // Email + infos établissement (recommandé)
+  email        String
+  businessName String
+  phone        String?
+  address      String?
+  city         String?
+  province     String?
+  country      String?
+  website      String?
+  instagram    String?
+  category     String? // Restaurant, Salon, etc.
+  notes        String?
+
+  status BrandApplicationStatus @default(PENDING)
+
+  reviewedAt   DateTime?
+  reviewedById Int?
+  reviewer     User?     @relation("ReviewedBrandApplications", fields: [reviewedById], references: [id])
+
+  // When approved, link to created brand
+  brandId Int?
+  brand   Brand? @relation(fields: [brandId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([email])
+}
+
+model AgencyApplication {
+  id Int @id @default(autoincrement())
+
+  // Email + infos (recommandé)
+  email        String
+  agencyName   String
+  contactName  String?
+  phone        String?
+  website      String?
+  instagram    String?
+  city         String?
+  province     String?
+  country      String?
+  notes        String?
+
+  status AgencyApplicationStatus @default(PENDING)
+
+  reviewedAt   DateTime?
+  reviewedById Int?
+  reviewer     User? @relation("ReviewedAgencyApplications", fields: [reviewedById], references: [id])
+
+  // When approved, link to created agency
+  agencyId Int?
+  agency   Agency? @relation(fields: [agencyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([email])
+}
+
+// =========================
+// Missions
+// =========================
+
+model MissionType {
+  id              Int      @id @default(autoincrement())
+  code            String   @unique // FOLLOW | LIKE | COMMENT | STORY
+  label           String
+  userRewardCents Int
+  brandCostCents  Int
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  missions Mission[]
+}
+
+model Mission {
+  id            Int @id @default(autoincrement())
+  brandId       Int
+  missionTypeId Int
+
+  title       String
+  description String
+  actionUrl   String
+
+  quantityTotal     Int @default(0)
+  quantityRemaining Int @default(0)
+
+  status String @default("PENDING_APPROVAL") // PENDING_APPROVAL | ACTIVE | PAUSED | REJECTED
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  brand       Brand       @relation(fields: [brandId], references: [id])
+  missionType MissionType @relation(fields: [missionTypeId], references: [id])
+  attempts    MissionAttempt[]
+
+  @@index([brandId, createdAt])
+  @@index([status, createdAt])
+}
+
+model MissionAttempt {
+  id        Int @id @default(autoincrement())
+  userId    Int
+  missionId Int
+
+  status     String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  createdAt  DateTime  @default(now())
+  reviewedAt DateTime?
+
+  reviewedByUserId Int?
+  reviewedByUser   User? @relation("ReviewedAttempts", fields: [reviewedByUserId], references: [id])
+
+  user    User    @relation(fields: [userId], references: [id])
+  mission Mission @relation(fields: [missionId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([missionId, createdAt])
+  @@index([userId, missionId, status], name: "idx_user_mission_status")
+}
+
+// =========================
+// Wallet / ledger
+// =========================
+
+model WalletTransaction {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  type        String // PENDING | CREDIT | DEBIT | ADJUST
+  amountCents Int
+  note        String?
+  missionId   Int?
+  attemptId   Int?
+  giftCardId  Int?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+}
+
+// =========================
+// Gift cards
+// =========================
+
+model GiftCard {
+  id         Int      @id @default(autoincrement())
+  brand      String
+  valueCents Int
+  createdAt  DateTime @default(now())
+
+  purchases GiftCardPurchase[]
+
+  @@unique([brand, valueCents], name: "uniq_brand_value")
+}
+
+model GiftCardPurchase {
+  id         Int @id @default(autoincrement())
+  userId     Int
+  giftCardId Int
+
+  code   String                 @unique
+  status GiftCardPurchaseStatus @default(ACTIVE)
+
+  // Anti double-débit (Idempotency-Key)
+  clientRequestId String? @unique
+
+  purchasedAt DateTime @default(now())
+  usedAt      DateTime?
+
+  usedByUserId Int?
+  usedByUser   User? @relation("BrandUserUsedPurchases", fields: [usedByUserId], references: [id])
+
+  user     User     @relation("UserGiftCardPurchases", fields: [userId], references: [id])
+  giftCard GiftCard @relation(fields: [giftCardId], references: [id])
+
+  @@index([userId, status, purchasedAt])
+  @@index([giftCardId, purchasedAt])
+}
+
+// =========================
+// Products (future)
+// =========================
+
+model Product {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  name        String
+  description String
+  priceCents  Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// =========================
+// Legacy models
+// =========================
+
+model MissionCompletion {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  missionId Int
+  createdAt DateTime @default(now())
+
+  user   User         @relation(fields: [userId], references: [id])
+  mission LegacyMission @relation(fields: [missionId], references: [id])
+
+  @@unique([userId, missionId], name: "userId_missionId_unique")
+}
+
+model LegacyMission {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  title       String
+  description String
+  rewardCents Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  completions MissionCompletion[]
+}
