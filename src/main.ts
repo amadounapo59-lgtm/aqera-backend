@@ -6,25 +6,28 @@ import * as express from 'express';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // ✅ Stripe webhook: needs raw body for signature verification
-  // Must be registered BEFORE body parsing for this route.
+  // Stripe webhook raw body (OK)
   app.use('/billing/webhook', express.raw({ type: 'application/json' }));
 
-  // ✅ CORS (OK pour local + Railway)
   app.enableCors({
     origin: true,
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'Stripe-Signature'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Idempotency-Key',
+      'Stripe-Signature',
+    ],
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   });
 
-  // ✅ Global error filter (plus jamais "Internal server error" brut côté app)
   app.useGlobalFilters(new AllExceptionsFilter());
 
   const port = Number(process.env.PORT ?? 3000);
-  await app.listen(port);
 
-  // eslint-disable-next-line no-console
-  console.log(`✅ API listening on http://localhost:${port}`);
+  // ✅ IMPORTANT pour Railway
+  await app.listen(port, '0.0.0.0');
+
+  console.log(`✅ API listening on 0.0.0.0:${port}`);
 }
 bootstrap();
