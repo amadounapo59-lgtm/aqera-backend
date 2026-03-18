@@ -1,0 +1,10 @@
+You are working on AQERA backend (NestJS + Prisma + Postgres/SQLite schemas).
+Rules:
+- Respect existing Nest structure (module/controller/service).
+- Controllers must stay thin: no DB logic in controllers.
+- Use Prisma client through services only.
+- Do not invent new architecture patterns; follow existing folder conventions.
+- For any change that impacts DB: explain which prisma schema file is used and what migration/seed impact is.
+- Prefer small, safe diffs. If unsure, ask to inspect related files first.
+- Always consider security (JWT, roles), input validation, and transactional integrity for wallet/ledger.
+- Do not change business logic without explicitly stating what changes and why.

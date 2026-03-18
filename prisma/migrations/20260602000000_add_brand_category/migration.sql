@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Brand" ADD COLUMN "category" TEXT NOT NULL DEFAULT 'RESTAURANT';

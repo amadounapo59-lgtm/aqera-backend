@@ -1,0 +1,613 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Production schema (PostgreSQL)
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// The remainder of this schema mirrors schema.dev.prisma / schema.prisma.
+// Keeping models in sync ensures the same data shape across environments.
+
+enum GiftCardPurchaseStatus {
+  ACTIVE
+  USED
+  CANCELED
+  REFUNDED
+}
+
+enum GiftCardInventoryStatus {
+  AVAILABLE
+  ISSUED
+  USED
+  VOID
+}
+
+enum BrandApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AgencyApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum UserBadge {
+  STARTER
+  REGULAR
+  ELITE
+}
+
+model User {
+  id           Int     @id @default(autoincrement())
+  email        String  @unique
+  name         String
+  passwordHash String?
+  role         String  @default("USER") // USER | CREATOR | BRAND | BRAND_OWNER | BRAND_STAFF | AGENCY | ADMIN
+
+  mustChangePassword    Boolean   @default(false)
+  tempPasswordIssuedAt  DateTime?
+  tempPasswordExpiresAt DateTime?
+
+  isActive     Boolean  @default(true)
+  emailVerified Boolean @default(false)
+
+  isBanned     Boolean   @default(false)
+  bannedReason String?
+  bannedAt     DateTime?
+  lastLoginAt  DateTime?
+  lastIp       String?
+  lastDeviceId String?
+
+  pendingCents   Int @default(0)
+  availableCents Int @default(0)
+  balanceCents   Int @default(0)
+
+  badgeLevel    UserBadge @default(STARTER)
+  dailyCapCents Int       @default(1000)
+
+  xp           Int      @default(0)
+  streakDays   Int      @default(0)
+  lastEarnedAt DateTime?
+  lastActiveAt DateTime?
+
+  isBlocked Boolean @default(false)
+
+  brandId Int?
+  brand   Brand? @relation(fields: [brandId], references: [id])
+
+  agencyId Int?
+  agency   Agency? @relation(fields: [agencyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  missionCompletions MissionCompletion[]
+
+  missionAttempts    MissionAttempt[]
+  reviewedAttempts   MissionAttempt[]    @relation("ReviewedAttempts")
+  walletTransactions WalletTransaction[]
+
+  giftCardPurchases GiftCardPurchase[] @relation("UserGiftCardPurchases")
+  usedPurchases     GiftCardPurchase[] @relation("BrandUserUsedPurchases")
+  redeemedInventoryItems GiftCardInventoryItem[]
+
+  reviewedBrandApplications BrandApplication[] @relation("ReviewedBrandApplications")
+  reviewedAgencyApplications AgencyApplication[] @relation("ReviewedAgencyApplications")
+
+  dailyEarnings UserDailyEarning[]
+  eventLogs     EventLog[]
+  userScore     UserScore?
+  adminAlerts   AdminAlert[]
+  securityEvents SecurityEvent[]
+}
+
+model Agency {
+  id        Int    @id @default(autoincrement())
+  name      String @unique
+  slug      String @unique
+  email     String @unique
+  phone     String?
+  website   String?
+  instagram String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscriptionStatus   String?
+  trialEndsAt          DateTime?
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  plan                 String?
+
+  users  User[]
+  brands AgencyBrand[]
+  applications AgencyApplication[]
+}
+
+model AgencyBrand {
+  id       Int @id @default(autoincrement())
+  agencyId Int
+  brandId  Int
+
+  role     String?
+  createdAt DateTime @default(now())
+
+  agency Agency @relation(fields: [agencyId], references: [id])
+  brand  Brand  @relation(fields: [brandId], references: [id])
+
+  @@unique([agencyId, brandId], name: "uniq_agency_brand")
+  @@index([agencyId])
+  @@index([brandId])
+}
+
+model Brand {
+  id          Int     @id @default(autoincrement())
+  name        String  @unique
+  slug        String  @unique
+  description String?
+  logoUrl     String?
+  website     String?
+  coverUrl    String?
+
+  status      String  @default("ACTIVE") // ACTIVE | SUSPENDED | DELETED
+
+  subscriptionStatus   String?
+  trialEndsAt          DateTime?
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  plan                 String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  missions Mission[]
+  users    User[]
+  giftCards GiftCard[]
+
+  applications BrandApplication[]
+  budget       BrandBudget?
+  agencies     AgencyBrand[]
+  campaigns    Campaign[]
+}
+
+model Campaign {
+  id                Int       @id @default(autoincrement())
+  brandId            Int
+  name              String
+  objective         String?
+  platforms         Json?
+  totalBudgetCents  Int
+  durationDays      Int
+  status            String    @default("ACTIVE")
+  startsAt          DateTime?
+  endsAt            DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  brand   Brand    @relation(fields: [brandId], references: [id])
+  missions Mission[]
+
+  @@index([brandId, createdAt])
+}
+
+model CentralPool {
+  id Int @id @default(1)
+
+  totalDepositedCents    Int @default(0)
+  reservedLiabilityCents Int @default(0)
+  totalSpentCents        Int @default(0)
+  platformRevenueCents   Int @default(0)
+
+  platformMarginCents    Int @default(0)
+  platformAvailableCents Int @default(0)
+  platformSpentCents     Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model BrandBudget {
+  id      Int @id @default(autoincrement())
+  brandId Int @unique
+  brand   Brand @relation(fields: [brandId], references: [id])
+
+  totalDepositedCents     Int @default(0)
+  reservedForMissionsCents Int @default(0)
+  spentCents              Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([brandId])
+}
+
+model UserDailyEarning {
+  id     Int @id @default(autoincrement())
+  userId Int
+  user   User @relation(fields: [userId], references: [id])
+
+  dateKey     String
+  earnedCents Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, dateKey], name: "uniq_user_day")
+  @@index([dateKey])
+}
+
+// Pilot security: append-only audit log
+model SecurityEvent {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  ip        String?
+  deviceId  String?
+  type      String
+  meta      Json?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@index([type, createdAt])
+  @@index([userId, createdAt])
+}
+
+model RateLimitCounter {
+  id            Int      @id @default(autoincrement())
+  key           String   @unique
+  count         Int      @default(0)
+  windowStart   DateTime
+  windowSeconds Int
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([windowStart])
+}
+
+model EventLog {
+  id         Int      @id @default(autoincrement())
+  userId     Int?
+  role       String?
+  eventName  String
+  entityType String?
+  entityId   Int?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([eventName, createdAt])
+  @@index([userId, createdAt])
+  @@index([entityType, entityId, createdAt])
+}
+
+model DailyMetrics {
+  id                 Int      @id @default(autoincrement())
+  dateKey            String   @unique
+  dau                Int      @default(0)
+  newUsers           Int      @default(0)
+  missionSubmits     Int      @default(0)
+  missionApprovals   Int      @default(0)
+  missionRejections  Int      @default(0)
+  giftcardPurchases  Int      @default(0)
+  marginEarnedCents  Int      @default(0)
+  activationRate24h       Float @default(0)
+  retentionD1             Float @default(0)
+  retentionD7              Float @default(0)
+  avgTimeToFirstRewardHours Float @default(0)
+  approvalRate            Float @default(0)
+  completionRate          Float @default(0)
+  avgMissionsPerActiveUser Float @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model UserScore {
+  userId    Int    @id
+  user      User   @relation(fields: [userId], references: [id])
+
+  trustScore Int       @default(50)
+  riskLevel  String    @default("MEDIUM")
+  rejects7d  Int       @default(0)
+  submits1h  Int       @default(0)
+  avgTimeToSubmitMs Int @default(0)
+  updatedAt  DateTime  @updatedAt
+}
+
+model MissionTypePerformance {
+  id Int @id @default(autoincrement())
+
+  missionTypeCode String
+  platform        String
+
+  views7d       Int   @default(0)
+  submits7d     Int   @default(0)
+  approvals7d   Int   @default(0)
+  rejections7d  Int   @default(0)
+
+  completionRate7d Float @default(0)
+  approvalRate7d   Float @default(0)
+
+  avgTimeToSubmitMs7d Int @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([missionTypeCode, platform], name: "uniq_type_platform")
+}
+
+model AdminAlert {
+  id           Int      @id @default(autoincrement())
+  type         String
+  severity     String
+  message      String
+  userId       Int?
+  user         User?    @relation(fields: [userId], references: [id])
+  metadataJson Json?
+  status       String   @default("OPEN")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([type, userId])
+  @@index([status])
+}
+
+model BrandApplication {
+  id Int @id @default(autoincrement())
+
+  email        String
+  businessName String
+  phone        String?
+  address      String?
+  city         String?
+  province     String?
+  country      String?
+  website      String?
+  instagram    String?
+  category     String?
+  notes        String?
+
+  initialBudgetCents Int?
+
+  status BrandApplicationStatus @default(PENDING)
+
+  reviewedAt   DateTime?
+  reviewedById Int?
+  reviewer     User? @relation("ReviewedBrandApplications", fields: [reviewedById], references: [id])
+
+  brandId Int?
+  brand   Brand? @relation(fields: [brandId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([email])
+}
+
+model AgencyApplication {
+  id Int @id @default(autoincrement())
+
+  email       String
+  agencyName  String
+  contactName String?
+  phone       String?
+  website     String?
+  instagram   String?
+  city        String?
+  province    String?
+  country     String?
+  notes       String?
+
+  status AgencyApplicationStatus @default(PENDING)
+
+  reviewedAt   DateTime?
+  reviewedById Int?
+  reviewer     User? @relation("ReviewedAgencyApplications", fields: [reviewedById], references: [id])
+
+  agencyId Int?
+  agency   Agency? @relation(fields: [agencyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([email])
+}
+
+model MissionType {
+  id              Int @id @default(autoincrement())
+  code            String @unique
+  label           String
+  userRewardCents Int
+  brandCostCents  Int
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  missions Mission[]
+}
+
+model Mission {
+  id            Int @id @default(autoincrement())
+  brandId       Int
+  missionTypeId Int
+  campaignId    Int?
+
+  title       String
+  description String
+  actionUrl   String
+
+  platform String?
+
+  quantityTotal     Int @default(0)
+  quantityRemaining Int @default(0)
+
+  status String @default("PENDING_APPROVAL")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  brand       Brand       @relation(fields: [brandId], references: [id])
+  missionType MissionType @relation(fields: [missionTypeId], references: [id])
+  campaign    Campaign?   @relation(fields: [campaignId], references: [id])
+  attempts    MissionAttempt[]
+
+  @@index([brandId, createdAt])
+  @@index([status, createdAt])
+  @@index([campaignId])
+}
+
+model MissionAttempt {
+  id        Int @id @default(autoincrement())
+  userId    Int
+  missionId Int
+
+  status     String   @default("PENDING")
+  createdAt  DateTime @default(now())
+  reviewedAt DateTime?
+
+  reviewedByUserId Int?
+  reviewedByUser   User? @relation("ReviewedAttempts", fields: [reviewedByUserId], references: [id])
+
+  user    User    @relation(fields: [userId], references: [id])
+  mission Mission @relation(fields: [missionId], references: [id])
+
+  @@unique([userId, missionId], name: "uniq_user_mission_attempt")
+  @@index([userId, createdAt])
+  @@index([missionId, createdAt])
+  @@index([userId, missionId, status], name: "idx_user_mission_status")
+}
+
+model WalletTransaction {
+  id          Int @id @default(autoincrement())
+  userId      Int
+  type        String
+  amountCents Int
+  note        String?
+  missionId   Int?
+  attemptId   Int?
+  giftCardId  Int?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+}
+
+model GiftCard {
+  id         Int @id @default(autoincrement())
+  brandId    Int
+  brand      Brand @relation(fields: [brandId], references: [id])
+  valueCents Int
+  createdAt  DateTime @default(now())
+
+  purchases GiftCardPurchase[]
+  inventory GiftCardInventoryItem[]
+
+  @@unique([brandId, valueCents], name: "uniq_brand_value")
+  @@index([brandId])
+}
+
+model GiftCardInventoryItem {
+  id        Int @id @default(autoincrement())
+  giftCardId Int
+  code      String @unique
+  status    GiftCardInventoryStatus @default(AVAILABLE)
+
+  issuedAt DateTime?
+  usedAt   DateTime?
+
+  usedByUserId Int?
+  usedByUser   User? @relation(fields: [usedByUserId], references: [id])
+
+  purchaseId Int?
+  purchase   GiftCardPurchase? @relation("GiftCardInventory")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  giftCard GiftCard @relation(fields: [giftCardId], references: [id])
+
+  @@index([giftCardId, status])
+}
+
+model GiftCardPurchase {
+  id         Int @id @default(autoincrement())
+  userId     Int
+  giftCardId Int
+
+  code   String                 @unique
+  status GiftCardPurchaseStatus @default(ACTIVE)
+
+  clientRequestId String? @unique
+
+  purchasedAt DateTime @default(now())
+  usedAt      DateTime?
+
+  usedByUserId Int?
+  usedByUser   User? @relation("BrandUserUsedPurchases", fields: [usedByUserId], references: [id])
+
+  user     User     @relation("UserGiftCardPurchases", fields: [userId], references: [id])
+  giftCard GiftCard @relation(fields: [giftCardId], references: [id])
+
+  inventoryItemId Int?
+  inventoryItem   GiftCardInventoryItem? @relation("GiftCardInventory", fields: [inventoryItemId], references: [id])
+
+  @@index([userId, status, purchasedAt])
+  @@index([giftCardId, purchasedAt])
+  @@unique([inventoryItemId], name: "uniq_inventory_item")
+}
+
+model Product {
+  id          Int @id @default(autoincrement())
+  code        String @unique
+  name        String
+  description String
+  priceCents  Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model MissionCompletion {
+  id        Int @id @default(autoincrement())
+  userId    Int
+  missionId Int
+  createdAt DateTime @default(now())
+
+  user   User          @relation(fields: [userId], references: [id])
+  mission LegacyMission @relation(fields: [missionId], references: [id])
+
+  @@unique([userId, missionId], name: "userId_missionId_unique")
+}
+
+model LegacyMission {
+  id          Int @id @default(autoincrement())
+  code        String @unique
+  title       String
+  description String
+  rewardCents Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  completions MissionCompletion[]
+}
+
+model AiAuditLog {
+  id         Int      @id @default(autoincrement())
+  userId     Int?
+  brandId    Int?
+  type       String
+  inputJson  Json?
+  outputJson Json?
+  createdAt  DateTime @default(now())
+
+  @@index([type, createdAt])
+  @@index([userId, createdAt])
+  @@index([brandId, createdAt])
+}
+

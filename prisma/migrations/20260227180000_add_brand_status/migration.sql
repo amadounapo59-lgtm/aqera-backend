@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Brand" ADD COLUMN "status" TEXT NOT NULL DEFAULT 'ACTIVE';

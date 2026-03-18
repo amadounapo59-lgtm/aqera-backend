@@ -1,0 +1,37 @@
+# AQERA Backend + PostgreSQL (dev/staging)
+# Usage: docker-compose up -d
+# API: http://localhost:3000  Health: http://localhost:3000/health
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: aqera
+      POSTGRES_PASSWORD: aqera
+      POSTGRES_DB: aqera
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aqera -d aqera"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgresql://aqera:aqera@db:5432/aqera
+      AUTH_SECRET: change-me-in-production
+      JWT_SECRET: change-me-in-production
+      # RUN_SEED: "1"  # optional: run seed on startup (requires ts-node; or run: docker-compose exec api npx prisma db seed)
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
