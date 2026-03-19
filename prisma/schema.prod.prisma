@@ -153,6 +153,7 @@ model Brand {
   logoUrl     String?
   website     String?
   coverUrl    String?
+  category    String  @default("RESTAURANT")
 
   status      String  @default("ACTIVE") // ACTIVE | SUSPENDED | DELETED
 
@@ -173,6 +174,19 @@ model Brand {
   budget       BrandBudget?
   agencies     AgencyBrand[]
   campaigns    Campaign[]
+  roiSettings  BrandSettings?
+}
+
+model BrandSettings {
+  brandId                Int      @unique
+  avgOrderValueCents     Int      @default(0)
+  defaultVisitRateBps    Int      @default(800)
+  defaultLeadRateBps     Int      @default(200)
+  defaultPurchaseRateBps Int      @default(150)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  brand Brand @relation(fields: [brandId], references: [id])
 }
 
 model Campaign {

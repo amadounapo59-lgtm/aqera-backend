@@ -24,8 +24,8 @@
     "prisma:seed": "npx prisma db seed",
     "db:dev": "prisma migrate dev --schema=prisma/schema.dev.prisma && prisma generate --schema=prisma/schema.dev.prisma",
     "db:prod": "prisma migrate deploy --schema=prisma/schema.prod.prisma && prisma generate --schema=prisma/schema.prod.prisma",
-    "seed:dev": "prisma db seed --schema=prisma/schema.dev.prisma",
-    "seed:prod": "prisma db seed --schema=prisma/schema.prod.prisma",
+    "seed:dev": "prisma generate --schema=prisma/schema.dev.prisma && prisma db seed --schema=prisma/schema.dev.prisma",
+    "seed:prod": "prisma generate --schema=prisma/schema.prod.prisma && prisma db seed --schema=prisma/schema.prod.prisma",
     "test:smoke": "bash scripts/smoke-test.sh"
   },
   "dependencies": {
