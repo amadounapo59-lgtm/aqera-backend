@@ -3,8 +3,6 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { BillingService } from './billing.service';
-import type { PlanCode } from './billing.service';
-
 @Controller('billing')
 export class BillingController {
   constructor(private readonly billing: BillingService) {}
@@ -17,13 +15,12 @@ export class BillingController {
     return this.billing.getStatus(req.user.id);
   }
 
-  // Create Checkout Session (Subscription + 14-day trial)
+  // Create Checkout Session (abonnement unique + essai gratuit, jours = STRIPE_TRIAL_DAYS ou 7)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('BRAND', 'AGENCY')
   @Post('checkout-session')
   async createCheckoutSession(
     @Req() req: any,
-    @Body('plan') plan: PlanCode,
     @Body('successUrl') successUrl?: string,
     @Body('cancelUrl') cancelUrl?: string,
   ) {
@@ -32,7 +29,6 @@ export class BillingController {
     const koUrl = cancelUrl || (base ? `${base}/billing/cancel` : 'http://localhost:3001/billing/cancel');
     return this.billing.createCheckoutSession({
       userId: req.user.id,
-      plan,
       successUrl: okUrl,
       cancelUrl: koUrl,
     });

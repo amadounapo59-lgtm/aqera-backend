@@ -26,10 +26,14 @@ RUN npx prisma generate --schema=prisma/schema.prod.prisma
 
 COPY --from=builder /app/dist dist/
 
+# Prisma WASM validates env("DATABASE_URL") exists. Railway injects the real URL at runtime;
+# this placeholder avoids P1012 if injection is missing until load-database-env overwrites it.
+ENV DATABASE_URL="postgresql://bootstrap:bootstrap@127.0.0.1:5432/bootstrap"
+
 ENV NODE_ENV=production
 EXPOSE 3000
 
-# Entrypoint: sync DB schema (db push), then start (migrate deploy if you have PG migrations)
+# Entrypoint: prisma generate + migrate deploy, then start Node
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 ENTRYPOINT ["/docker-entrypoint.sh"]

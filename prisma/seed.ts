@@ -1,7 +1,39 @@
 // prisma/seed.ts
+// Charge .env puis permet d’écraser avec `export DATABASE_URL=...` dans le terminal.
+import 'dotenv/config';
 
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+
+/** Railway (proxy.rlwy.net) exige souvent TLS ; sinon PrismaClientInitializationError. */
+function ensureSslForRailwayProxy(): void {
+  const u = process.env.DATABASE_URL;
+  if (!u || (!u.includes('rlwy.net') && !u.includes('railway.app'))) return;
+  if (/[?&]sslmode=/.test(u)) return;
+  const sep = u.includes('?') ? '&' : '?';
+  process.env.DATABASE_URL = `${u}${sep}sslmode=require`;
+  console.log('ℹ️  sslmode=require ajouté pour la connexion Railway.');
+}
+
+function logSafeDbHint(): void {
+  const u = process.env.DATABASE_URL;
+  if (!u) {
+    console.error('❌ DATABASE_URL est vide. Définis-la (ex. export depuis Railway → Postgres).');
+    return;
+  }
+  if (u.startsWith('file:')) {
+    console.warn(
+      '⚠️  DATABASE_URL = SQLite local. Pour seeder la prod, lance dans le même terminal :\n' +
+        '   export DATABASE_URL="postgresql://..."   # URL publique Railway, puis relance le seed.',
+    );
+  } else {
+    const masked = u.replace(/:([^:@]{0,})@/, ':****@');
+    console.log('📍 Cible DB:', masked);
+  }
+}
+
+ensureSslForRailwayProxy();
+logSafeDbHint();
 
 const prisma = new PrismaClient();
 
@@ -351,6 +383,16 @@ async function main() {
 main()
   .catch((e) => {
     console.error('❌ Seed error:', e);
+    const msg = String(e?.message ?? e);
+    if (msg.includes('P1001') || msg.includes("Can't reach database")) {
+      console.error('\n→ Réseau / hôte : vérifie l’URL, le port, et que la machine peut joindre le host (pas railway.internal depuis ton Mac).');
+    }
+    if (msg.includes('does not exist') && msg.includes('Database')) {
+      console.error('\n→ Nom de base : l’URL doit se terminer par /railway (pas /railwayl, etc.).');
+    }
+    if (msg.includes('SSL') || msg.includes('certificate') || msg.includes('TLS')) {
+      console.error('\n→ SSL : l’URL Railway publique doit accepter TLS (sslmode=require est ajouté automatiquement pour *.rlwy.net).');
+    }
     process.exit(1);
   })
   .finally(async () => {

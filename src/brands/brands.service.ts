@@ -410,6 +410,27 @@ export class BrandsService {
     return this.resolveBrandId(user, brandId);
   }
 
+  private async assertBrandSubscriptionActive(brandId: number): Promise<void> {
+    const brand = await this.prisma.brand.findUnique({
+      where: { id: brandId },
+      select: { subscriptionStatus: true, trialEndsAt: true },
+    });
+    if (!brand) throw new NotFoundException('Marque introuvable');
+
+    const status = (brand.subscriptionStatus ?? '').toUpperCase();
+    const isTrialing = status === 'TRIALING';
+    const trialExpired =
+      isTrialing && brand.trialEndsAt instanceof Date
+        ? brand.trialEndsAt.getTime() < Date.now()
+        : false;
+    const isAllowed = status === 'ACTIVE' || (isTrialing && !trialExpired);
+    if (!isAllowed) {
+      throw new ForbiddenException(
+        "Abonnement inactif. Activez votre abonnement pour créer et diffuser des campagnes.",
+      );
+    }
+  }
+
   private generateTempPassword(length = 10): string {
     const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
     const special = '!@#$%';
@@ -901,6 +922,7 @@ export class BrandsService {
     },
   ) {
     const bid = await this.resolveBrandId(user, data.brandId);
+    await this.assertBrandSubscriptionActive(bid);
     // Accept either missionTypeId or missionTypeCode (web dashboard uses code).
     let mtId = Number(data.missionTypeId ?? 0);
     let mt = Number.isFinite(mtId) && mtId > 0
@@ -1039,6 +1061,7 @@ export class BrandsService {
     },
   ) {
     const bid = await this.resolveBrandId(user, data.brandId);
+    await this.assertBrandSubscriptionActive(bid);
     const name = (data.name ?? '').trim();
     if (!name) throw new BadRequestException('Nom de campagne obligatoire');
     const durationDays = Math.max(1, Math.floor(Number(data.durationDays ?? 0)));

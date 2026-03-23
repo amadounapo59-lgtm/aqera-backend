@@ -1,3 +1,7 @@
+// Load .env then DB URL before any import that pulls in @prisma/client.
+import 'dotenv/config';
+import './prisma/load-database-env';
+
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';

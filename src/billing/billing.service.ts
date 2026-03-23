@@ -3,7 +3,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import Stripe from 'stripe';
 
 export type AccountType = 'BRAND' | 'AGENCY';
-export type PlanCode = 'STARTER' | 'PRO' | 'ELITE';
+/** Un seul plan commercial (ex. 49 CAD/mois) — valeur stockée en base / metadata Stripe. */
+export type PlanCode = 'STANDARD';
 
 function requiredEnv(name: string) {
   const v = process.env[name];
@@ -29,9 +30,67 @@ export class BillingService {
     return this.stripe;
   }
 
-  private getPriceId(accountType: AccountType, plan: PlanCode): string {
-    const key = `STRIPE_PRICE_${accountType}_${plan}`;
-    return requiredEnv(key);
+  /**
+   * Un seul Price Stripe (ex. 49 CAD/mois).
+   * Priorité : STRIPE_PRICE_ID → repli legacy (même URL pour tous les comptes).
+   */
+  private getSubscriptionPriceId(): string {
+    const single = process.env.STRIPE_PRICE_ID?.trim();
+    if (single) return single;
+    const legacy =
+      process.env.STRIPE_PRICE_BRAND_STARTER?.trim() ||
+      process.env.STRIPE_PRICE_AGENCY_STARTER?.trim();
+    if (legacy) return legacy;
+    throw new Error(
+      'Missing Stripe price: set STRIPE_PRICE_ID=price_... (recommandé) ou STRIPE_PRICE_BRAND_STARTER / STRIPE_PRICE_AGENCY_STARTER en repli.',
+    );
+  }
+
+  private trialDays(): number {
+    const raw = process.env.STRIPE_TRIAL_DAYS;
+    const n = raw ? parseInt(raw, 10) : 7;
+    return Number.isFinite(n) && n >= 0 ? n : 7;
+  }
+
+  /**
+   * Trial uniquement pour "nouveaux comptes":
+   * - s'il existe déjà un stripeSubscriptionId en base => trial déjà consommé.
+   * - sinon on vérifie l'historique Stripe du customer (si présent) ; s'il y a déjà eu
+   *   un abonnement, on n'applique plus de trial.
+   */
+  private async canApplyTrialOnce(params: {
+    accountType: AccountType;
+    brandId?: number | null;
+    agencyId?: number | null;
+    stripeCustomerId?: string | null;
+  }): Promise<boolean> {
+    if (params.accountType === 'BRAND' && params.brandId) {
+      const brand = await this.prisma.brand.findUnique({
+        where: { id: params.brandId },
+        select: { stripeSubscriptionId: true },
+      });
+      if (brand?.stripeSubscriptionId) return false;
+    }
+    if (params.accountType === 'AGENCY' && params.agencyId) {
+      const agency = await this.prisma.agency.findUnique({
+        where: { id: params.agencyId },
+        select: { stripeSubscriptionId: true },
+      });
+      if (agency?.stripeSubscriptionId) return false;
+    }
+    if (!params.stripeCustomerId) return true;
+
+    try {
+      const subs = await this.assertStripe().subscriptions.list({
+        customer: params.stripeCustomerId,
+        status: 'all',
+        limit: 1,
+      });
+      return subs.data.length === 0;
+    } catch {
+      // Si Stripe ne répond pas, on reste conservateur : pas de trial.
+      return false;
+    }
   }
 
   async getBillingStatus(userId: number) {
@@ -70,14 +129,13 @@ export class BillingService {
 
   async createCheckoutSession(params: {
     userId: number;
-    plan: PlanCode;
     successUrl: string;
     cancelUrl: string;
   }) {
     const user = await this.prisma.user.findUnique({ where: { id: params.userId } });
     if (!user) throw new BadRequestException('Utilisateur introuvable');
 
-    const plan = params.plan;
+    const plan: PlanCode = 'STANDARD';
     const role = (user.role ?? 'USER').toUpperCase();
 
     if (role !== 'BRAND' && role !== 'AGENCY') {
@@ -85,7 +143,7 @@ export class BillingService {
     }
 
     const accountType = role as AccountType;
-    const priceId = this.getPriceId(accountType, plan);
+    const priceId = this.getSubscriptionPriceId();
 
     // Resolve / create Stripe customer
     let stripeCustomerId: string | null = null;
@@ -134,6 +192,14 @@ export class BillingService {
       }
     }
 
+    const trialEligible = await this.canApplyTrialOnce({
+      accountType,
+      brandId: user.brandId,
+      agencyId: user.agencyId,
+      stripeCustomerId,
+    });
+    const trialDays = trialEligible ? this.trialDays() : 0;
+
     const session = await this.assertStripe().checkout.sessions.create({
       mode: 'subscription',
       customer: stripeCustomerId ?? undefined,
@@ -142,7 +208,7 @@ export class BillingService {
       success_url: params.successUrl,
       cancel_url: params.cancelUrl,
       subscription_data: {
-        trial_period_days: 14,
+        ...(trialDays > 0 ? { trial_period_days: trialDays } : {}),
         metadata: {
           accountType,
           plan,

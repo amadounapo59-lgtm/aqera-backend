@@ -28,7 +28,7 @@ services:
       DATABASE_URL: postgresql://aqera:aqera@db:5432/aqera
       AUTH_SECRET: change-me-in-production
       JWT_SECRET: change-me-in-production
-      # RUN_SEED: "1"  # optional: run seed on startup (requires ts-node; or run: docker-compose exec api npx prisma db seed)
+      # RUN_SEED: "1"  # optional: run seed on startup (or: docker-compose exec api npx prisma db seed)
     depends_on:
       db:
         condition: service_healthy
