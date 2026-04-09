@@ -49,7 +49,10 @@ export class MissionsController {
   async submitAttempt(
     @Req() req: any,
     @Param('missionId', ParseIntPipe) missionId: number,
-    @Body() body: { timeToSubmitMs?: number; clientTimestamp?: number } | undefined,
+    @Body()
+    body:
+      | { timeToSubmitMs?: number; clientTimestamp?: number; platformUsername?: string }
+      | undefined,
   ) {
     const ctx = getRequestContext(req);
     const secCtx = req.securityContext ?? { ip: 'unknown', deviceId: 'unknown' };
@@ -77,7 +80,11 @@ export class MissionsController {
       }
     }
     try {
-      const out = await this.missionsService.submitAttempt(req.user.id, missionId);
+      const out = await this.missionsService.submitAttempt(
+        req.user.id,
+        missionId,
+        body?.platformUsername,
+      );
       await this.analytics.logEvent({
         userId: req.user?.id,
         role: req.user?.role,
@@ -85,7 +92,11 @@ export class MissionsController {
         entityType: EntityTypes.MISSION_ATTEMPT,
         entityId: (out as any)?.attemptId ?? undefined,
         metadata: mergeContextIntoMetadata(
-          { mission_id: missionId, time_to_submit_ms: body?.timeToSubmitMs },
+          {
+            mission_id: missionId,
+            time_to_submit_ms: body?.timeToSubmitMs,
+            ...(out.platformUsername ? { platform_username: out.platformUsername } : {}),
+          },
           ctx,
         ),
       }).catch(() => {});

@@ -379,6 +379,9 @@ model MissionAttempt {
   userId    Int
   missionId Int
 
+  /// Pseudo / @username déclaré par l’utilisateur sur la plateforme cible (preuve pour l’admin).
+  platformUsername String?
+
   status     String    @default("PENDING") // PENDING | APPROVED | REJECTED
   createdAt  DateTime  @default(now())
   reviewedAt DateTime?

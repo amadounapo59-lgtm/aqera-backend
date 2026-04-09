@@ -17,6 +17,15 @@ function startOfNextLocalDay(d = new Date()): Date {
   return x;
 }
 
+const PLATFORM_USERNAME_MAX = 200;
+
+/** Trim + max length; chaîne vide / whitespace → null (persisté en base comme NULL). */
+function normalizePlatformUsername(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const s = String(raw).trim().slice(0, PLATFORM_USERNAME_MAX);
+  return s.length ? s : null;
+}
+
 @Injectable()
 export class MissionsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -144,6 +153,7 @@ export class MissionsService {
         : null,
       attemptId: a.id,
       attemptStatus: a.status,
+      platformUsername: a.platformUsername ?? undefined,
       submittedAt: a.createdAt.toISOString(),
       reviewedAt: a.reviewedAt?.toISOString() ?? null,
     }));
@@ -166,9 +176,14 @@ export class MissionsService {
   }
 
   // ✅ User clique “J’ai terminé” => attempt PENDING
-  async submitAttempt(userId: number, missionId: number) {
+  async submitAttempt(
+    userId: number,
+    missionId: number,
+    platformUsernameRaw?: string | null,
+  ) {
     if (!Number.isFinite(userId) || userId <= 0) throw new BadRequestException('userId invalide');
     if (!Number.isFinite(missionId) || missionId <= 0) throw new BadRequestException('missionId invalide');
+    const platformUsername = normalizePlatformUsername(platformUsernameRaw);
 
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { isBanned: true, bannedReason: true } });
     if (user?.isBanned) {
@@ -235,7 +250,7 @@ export class MissionsService {
         }
 
       const attempt = await tx.missionAttempt.create({
-        data: { userId, missionId, status: 'PENDING' },
+        data: { userId, missionId, status: 'PENDING', platformUsername },
       });
 
       // Pas d'incrément de reserved ici: réservé à la création de la mission.
@@ -276,6 +291,7 @@ export class MissionsService {
         attemptId: attempt.id,
         status: attempt.status,
         userRewardCents: mission.missionType.userRewardCents,
+        platformUsername: platformUsername ?? undefined,
       };
     });
     } catch (e: any) {
@@ -305,6 +321,7 @@ export class MissionsService {
       attempts: attempts.map((a) => ({
         id: a.id,
         status: a.status,
+        platformUsername: a.platformUsername ?? undefined,
         createdAt: a.createdAt,
         reviewedAt: a.reviewedAt,
         mission: a.mission
